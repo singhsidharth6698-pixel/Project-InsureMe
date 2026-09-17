@@ -115,53 +115,81 @@ docker
 
 ```groovy
 pipeline {
-    agent any 
-    tools{
+    agent any
+
+    tools {
         maven 'maven'
     }
-    environment {
 
-     S3_BUCKET = "cdec-b57-jenkins-s3-int"
-     REGION = "ap-southeast-1"
-     warFile = "target/Insurance-0.0.1-SNAPSHOT.jar"
-     }
+    environment {
+        S3_BUCKET = "cdec-b57-jenkins-s3"
+        REGION = "us-east-1"
+        warFile = "target/Insurance-0.0.1-SNAPSHOT.jar"
+        DOCKER_IMAGE = "sidharthx1999/insure:latest"
+    }
+
     stages {
-        stage('code-pull'){
-            steps{
-                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/abhipraydhoble/Project-InsureMe.git']])
+
+        stage('code-pull') {
+            steps {
+                checkout scmGit(
+                    branches: [[name: '*/main']],
+                    extensions: [],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/abhipraydhoble/Project-InsureMe.git'
+                    ]]
+                )
             }
         }
-        stage('code-build'){
-            steps{
+
+        stage('code-build') {
+            steps {
                 sh 'mvn clean package'
             }
         }
-        stage('code-push'){
-            steps{
-                withCredentials([aws(accessKeyVariable: 'AWS_ACCESS_KEY_ID', credentialsId: 'aws_cred', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                   sh 'aws s3 cp ${warFile} s3://${S3_BUCKET}/Artifacts/ --region ${REGION}'
-                 }
-            }
-        }
-       stage('docker-image'){
-            steps{
-                sh 'docker build -t abhipraydh96/insure .'
-                
-            }
-        }
-        
-        stage('image-push'){
+
+        stage('code-push') {
             steps {
-       	       withCredentials([usernamePassword(credentialsId: 'docker_cred', passwordVariable: 'dockerHubPassword', usernameVariable: 'dockerHubUser')]) {
-            	sh "docker login -u ${env.dockerHubUser} -p ${env.dockerHubPassword}"
-                sh 'docker push abhipraydh96/insure'
-               }
+                withCredentials([
+                    aws(
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        credentialsId: 'aws_cred',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+                    sh 'aws s3 cp ${warFile} s3://${S3_BUCKET}/Artifacts/ --region ${REGION}'
+                }
             }
-        } 
-        
-        stage('code-deploy'){
-            steps{
-                sh 'docker run -itd --name insure-me -p 8089:8081 abhipraydh96/insure'
+        }
+
+        stage('docker-image') {
+            steps {
+                sh 'docker build -t ${DOCKER_IMAGE} .'
+            }
+        }
+
+        stage('image-push') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'docker_cred',
+                        passwordVariable: 'dockerHubPassword',
+                        usernameVariable: 'dockerHubUser'
+                    )
+                ]) {
+
+                    sh 'echo "$dockerHubPassword" | docker login -u "$dockerHubUser" --password-stdin'
+
+                    sh 'docker push ${DOCKER_IMAGE}'
+                }
+            }
+        }
+
+        stage('code-deploy') {
+            steps {
+                sh 'docker rm -f insure-me || true'
+
+                sh 'docker run -d --name insure-me -p 8089:8081 ${DOCKER_IMAGE}'
             }
         }
     }
